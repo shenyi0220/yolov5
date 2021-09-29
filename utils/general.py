@@ -636,6 +636,69 @@ def clip_coords(boxes, shape):
         boxes[:, [1, 3]] = boxes[:, [1, 3]].clip(0, shape[0])  # y1, y2
 
 
+def soft_nms_pytorch(dets, scores, Nt=0.5, method=0, sigma=0.5, thresh=0.001, sna_thresh=0.8):
+    """
+    Build a pytorch implement of Soft NMS algorithm.
+    # Augments
+        dets:        boxes coordinate tensor (format:[y1, x1, y2, x2])
+        scores:  box score tensors
+        sigma:       variance of Gaussian function
+        thresh:      score thresh
+    # Return
+        the index of the selected boxes
+    """
+    EPSILON = 0.0001
+
+    # Indexes concatenate boxes with the last column
+    N = dets.shape[0]
+    sorted_scores, indices = torch.sort(scores.clone(), descending=True)
+    sorted_dets = dets[indices, :].clone()
+
+    for i in range(N):
+        pos = i + 1
+        tscore = sorted_scores[i]
+        if tscore < EPSILON or i == N - 1:
+            continue
+
+        # IoU calculate
+        ovr = box_iou(sorted_dets[i, :].view(1, 4), sorted_dets[pos:, :])
+        ovr = ovr.view(ovr.shape[1])
+
+        # Three methods: 1.linear 2.gaussian 3.original NMS
+        if method == 1:  # linear
+            weight = torch.ones_like(ovr)
+            weight[ovr > Nt] = weight[ovr > Nt] - ovr[ovr > Nt]
+        elif method == 2:  # gaussian
+            weight = np.exp(-(ovr * ovr) / sigma)
+        else:  # original NMS
+            weight = torch.ones_like(ovr)
+            weight[ovr > Nt] = 0.0
+
+        if sna_thresh > Nt:
+            sna_mask = (ovr >= sna_thresh)
+            sna_r_mask = (ovr < sna_thresh)
+            auxProposalNumber = torch.count_nonzero(sna_mask).float()
+            if auxProposalNumber > 0.0:
+                sna_scores = sorted_scores[pos:].clone()
+                sna_scores[sna_r_mask] = 0.0
+                sna_max_pos = torch.argmax(sna_scores, axis=0)
+                auxMaxConf = sna_scores[sna_max_pos]
+                sorted_scores[i] = sorted_scores[i] + (1.0 - sorted_scores[i]) * (auxProposalNumber / (auxProposalNumber + 1.0)) * auxMaxConf
+                #if auxMaxConf > 0.0:
+                    #auxMaxPos = sorted_dets[pos+sna_max_pos, :].clone()
+                    #sorted_dets[i, :] = (tscore * sorted_dets[i, :] + auxMaxConf * auxMaxPos) / (tscore + auxMaxConf)
+                    #sorted_dets[i, :] = 1.0 * sorted_dets[i, :]
+
+
+        sorted_scores[pos:] = weight * sorted_scores[pos:]
+
+    # select the boxes and keep the corresponding indices
+    keep_mask = sorted_scores > thresh
+    keep = indices[keep_mask]
+
+    return keep, sorted_scores[keep_mask].clone(), sorted_dets[keep_mask, :].clone()
+
+
 def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=None, agnostic=False, multi_label=False,
                         labels=(), max_det=300):
     """Runs Non-Maximum Suppression (NMS) on inference results
@@ -711,6 +774,9 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
         # Batched NMS
         c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes
         boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
+        #i, updated_scores, updated_dets = soft_nms_pytorch(boxes, scores, Nt=iou_thres)
+        #x[i, 4] = updated_scores
+        #x[i, :4] = updated_dets
         i = torchvision.ops.nms(boxes, scores, iou_thres)  # NMS
         if i.shape[0] > max_det:  # limit detections
             i = i[:max_det]
