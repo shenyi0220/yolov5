@@ -5,6 +5,7 @@ import unittest
 import numpy as np
 import torch
 from utils.general import soft_nms_pytorch
+from mmcv.ops import nms
 
 class TestNMS(unittest.TestCase):
     def test_nms_cpu(self):
@@ -52,7 +53,7 @@ class TestNMS(unittest.TestCase):
         gt_indices = [[1, 3], [1, 3], [1, 3], [1, 2, 3, 4], [0, 1, 2, 3, 4]]
 
         for thresh, gt_index in zip(test_thresh, gt_indices):
-            keep_indices, _, _ = soft_nms_pytorch(boxes, scores, thresh)
+            dets, keep_indices = nms(boxes.contiguous(), scores.contiguous(), iou_threshold=thresh)
             keep_indices = np.sort(keep_indices.float().cpu().data.numpy())
             print("thresh is {}".format(thresh))
             print("gt_indices is {}".format(gt_index))
@@ -213,7 +214,7 @@ class TestNMS(unittest.TestCase):
                 50,
             ]
         )
-        keep_indices, _, _ = soft_nms_pytorch(boxes, scores, 0.5)
+        dets, keep_indices = nms(boxes.contiguous(), scores.contiguous(), iou_threshold = 0.5)
         keep_indices = np.sort(keep_indices.cpu().data.numpy())
 
         np.testing.assert_array_equal(keep_indices, gt_indices)
@@ -372,7 +373,7 @@ class TestNMS(unittest.TestCase):
                 50,
             ]
         )
-        keep_indices,_, _ = soft_nms_pytorch(boxes, scores, Nt=0.5)
+        dets, keep_indices = nms(boxes.contiguous(), scores.contiguous(), iou_threshold=0.5)
         print(keep_indices)
         keep_indices = np.sort(keep_indices)
 
