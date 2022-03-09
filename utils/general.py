@@ -28,6 +28,7 @@ import torch
 import torchvision
 import yaml
 
+from mmcv.ops import soft_nms, nms
 from utils.downloads import gsutil_getsize
 from utils.metrics import box_iou, fitness
 
@@ -711,7 +712,12 @@ def non_max_suppression(prediction, conf_thres=0.25, iou_thres=0.45, classes=Non
         # Batched NMS
         c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes
         boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
-        i = torchvision.ops.nms(boxes, scores, iou_thres)  # NMS
+        #i = torchvision.ops.nms(boxes, scores, iou_thres)  # NMS
+        dets, i = soft_nms(boxes.contiguous(), scores.contiguous(), iou_threshold=iou_thres,
+                           sigma=0.5, min_score=0.001, method='linear', offset=0)
+        x[i, 4] = dets[:, 4]
+        x[i, :4] = dets[:, :4] - c[i, :]
+        #x[i, :4] = dets[:, :4]
         if i.shape[0] > max_det:  # limit detections
             i = i[:max_det]
         if merge and (1 < n < 3E3):  # Merge NMS (boxes merged using weighted mean)
