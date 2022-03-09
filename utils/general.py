@@ -33,6 +33,7 @@ import torch
 import torchvision
 import yaml
 
+from mmcv.ops import soft_nms, nms
 from utils.downloads import gsutil_getsize
 from utils.metrics import box_iou, fitness
 
@@ -795,7 +796,8 @@ def non_max_suppression(prediction,
     # min_wh = 2  # (pixels) minimum box width and height
     max_wh = 7680  # (pixels) maximum box width and height
     max_nms = 30000  # maximum number of boxes into torchvision.ops.nms()
-    time_limit = 0.3 + 0.03 * bs  # seconds to quit after
+    #time_limit = 0.3 + 0.03 * bs  # seconds to quit after
+    time_limit = 20.0 + 1.0 * bs
     redundant = True  # require redundant detections
     multi_label &= nc > 1  # multiple labels per box (adds 0.5ms/img)
     merge = False  # use merge-NMS
@@ -852,7 +854,12 @@ def non_max_suppression(prediction,
         # Batched NMS
         c = x[:, 5:6] * (0 if agnostic else max_wh)  # classes
         boxes, scores = x[:, :4] + c, x[:, 4]  # boxes (offset by class), scores
-        i = torchvision.ops.nms(boxes, scores, iou_thres)  # NMS
+        #i = torchvision.ops.nms(boxes, scores, iou_thres)  # NMS
+        dets, i = soft_nms(boxes.contiguous(), scores.contiguous(), iou_threshold=iou_thres,
+                           sigma=0.5, min_score=0.001, method='linear', offset=0)
+        x[i, 4] = dets[:, 4]
+        x[i, :4] = dets[:, :4] - c[i, :]
+        #x[i, :4] = dets[:, :4]
         if i.shape[0] > max_det:  # limit detections
             i = i[:max_det]
         if merge and (1 < n < 3E3):  # Merge NMS (boxes merged using weighted mean)
